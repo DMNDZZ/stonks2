@@ -1,0 +1,271 @@
+# inventory_manager.py
+from google_sheets import GoogleSheetsManager
+from config import *
+
+class InventoryManager:
+    def __init__(self):
+        self.sheets = GoogleSheetsManager()
+        self.inventory = []
+        self.prices = []
+        self.load_data()
+        self.debug_inventory_structure()
+        self.setup_auto_refresh()
+
+    def setup_auto_refresh(self):
+        """Настройка автоматического обновления данных"""
+        import threading
+        import time
+        
+        def auto_refresh():
+            while True:
+                time.sleep(300)  # 5 минут
+                try:
+                    self.refresh_data()
+                except Exception as e:
+                    print(f"❌ Ошибка автоматического обновления: {e}")
+        
+        # Запускаем в фоновом потоке
+        refresh_thread = threading.Thread(target=auto_refresh, daemon=True)
+        refresh_thread.start()
+        print("🔄 Автоматическое обновление данных включено (каждые 5 минут)")
+
+    def get_price_from_table(self, equipment_type: str, duration: str, day_type: str) -> float:
+        """Получение цены из таблицы цен Google Sheets"""
+        try:
+            print(f"🔍 ПОИСК ЦЕНЫ: Вид='{equipment_type}', Срок='{duration}', День='{day_type}'")
+            
+            if not self.prices:
+                print("❌ Таблица цен не загружена!")
+                return 0.0
+                
+            for i, price_record in enumerate(self.prices):
+                record_type = str(price_record.get('Вид', '')).strip()
+                record_duration = str(price_record.get('Срок аренды', '')).strip()
+                record_day_type = str(price_record.get('День недели', '')).strip()
+                
+                print(f"   Запись {i}: Вид='{record_type}', Срок='{record_duration}', День='{record_day_type}'")
+                
+                if (record_type == equipment_type and 
+                    record_duration == duration and 
+                    record_day_type == day_type):
+                    
+                    price_str = price_record.get('Цена', '0')
+                    try:
+                        price = float(price_str)
+                        print(f"✅ Найдена цена: {price}₽")
+                        return price
+                    except ValueError:
+                        print(f"❌ Ошибка преобразования цены: '{price_str}'")
+                        return 0.0
+            
+            print(f"❌ Цена не найдена!")
+            return 0.0
+        
+        except Exception as e:
+            print(f"❌ Ошибка получения цены: {e}")
+            return 0.0
+
+    def get_equipment_types_ordered(self):
+        """Получение типов оборудования в порядке из Google Sheets"""
+        try:
+            # Получаем все уникальные типы оборудования
+            equipment_types = set()
+            for item in self.inventory:
+                if item.get('Вид'):
+                    equipment_types.add(item['Вид'])
+            
+            # Приоритетный порядок основных типов
+            priority_types = [
+                'Сноуборд',
+                'Горные лыжи', 
+                'Ботинки сноуборд',
+                'Ботинки горные лыжи',
+                'Крепления',
+                'Горнолыжные палки',
+                'Шлема',
+                'Перчатки',
+                'Варежки'
+            ]
+            
+            ordered_types = []
+            # Добавляем приоритетные типы в указанном порядке
+            for priority_type in priority_types:
+                if priority_type in equipment_types:
+                    ordered_types.append(priority_type)
+                    equipment_types.remove(priority_type)
+            
+            # Добавляем остальные в алфавитном порядке
+            ordered_types.extend(sorted(equipment_types))
+            
+            print(f"✅ Порядок типов оборудования: {ordered_types}")
+            return ordered_types
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения порядка типов: {e}")
+            # Фолбэк - просто алфавитный порядок
+            equipment_types = set(item.get('Вид') for item in self.inventory if item.get('Вид'))
+            return sorted(equipment_types)
+
+    def debug_inventory_structure(self):
+        """Отладочная информация о структуре инвентаря"""
+        if self.inventory:
+            print("🔍 СТРУКТУРА ДАННЫХ ИНВЕНТАРЯ:")
+            print("🔍 Заголовки:", list(self.inventory[0].keys()))
+            print("🔍 Первая запись:", self.inventory[0])
+            print("🔍 Всего записей:", len(self.inventory))
+    
+    def load_data(self):
+        """Загрузка данных из таблиц"""
+        self.inventory = self.sheets.get_inventory()
+        self.prices = self.sheets.get_prices()
+        print(f"✅ Загружено {len(self.inventory)} позиций инвентаря")
+        print(f"✅ Загружено {len(self.prices)} ценовых правил")
+        
+        # ОТЛАДОЧНАЯ ИНФОРМАЦИЯ
+        if self.prices:
+            print("🔔 Первые 3 записи из цен:")
+            for i, price in enumerate(self.prices[:3]):
+                print(f"   {i+1}. Вид: {price.get('Вид')}, Срок: {price.get('Срок аренды')}, День: {price.get('День недели')}, Цена: {price.get('Цена')}")
+    
+    def get_available_equipment(self, equipment_type=None):
+        """Получение доступного оборудования по типу (только то, что есть в наличии)"""
+        try:
+            # Обновляем данные перед показом
+            self.refresh_data()
+            
+            available_items = []
+            for item in self.inventory:
+                # Проверяем наличие
+                availability = item.get('В наличии', '0')
+                try:
+                    count = int(availability)
+                except ValueError:
+                    count = 0
+                
+                if count > 0:
+                    if equipment_type is None or item.get('Вид') == equipment_type:
+                        available_items.append(item)
+            
+            print(f"✅ Найдено {len(available_items)} доступных позиций типа '{equipment_type}'")
+            return available_items
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения доступного оборудования: {e}")
+            return []
+
+    def get_brands(self, equipment_type):
+        """Получение брендов по типу оборудования (только те, что есть в наличии)"""
+        # Обновляем данные перед показом
+        self.refresh_data()
+        
+        brands = set()
+        for item in self.inventory:
+            if (item.get('Вид') == equipment_type and 
+                item.get('Бренд') and 
+                self.is_available(item)):
+                brands.add(item['Бренд'])
+        return sorted(list(brands))
+ 
+    def get_models(self, equipment_type, brand):
+        """Получение 'моделей' (на основе ростовки/размера) по бренду"""
+        models = set()
+        for item in self.inventory:
+            if item.get('Вид') == equipment_type and item.get('Бренд') == brand:
+                # Создаем уникальный идентификатор на основе ростовки/размера
+                size = item.get('Ростовка') or item.get('Размер')
+                if size:
+                    models.add(size)
+        return sorted(list(models))
+    
+    def get_sizes(self, equipment_type, brand):
+        """Получение доступных размеров/ростовок (только те, что есть в наличии)"""
+        self.refresh_data()
+
+        sizes = []
+        for item in self.inventory:
+            if (item.get('Вид') == equipment_type and 
+                item.get('Бренд') == brand and
+                self.is_available(item)):
+                
+                size = item.get('Ростовка') or item.get('Размер')
+                if size:
+                    sizes.append(str(size))
+        
+        return sorted(list(set(sizes)))
+    
+    def refresh_data(self):
+        """Обновление данных из таблиц без перезапуска бота"""
+        try:
+            print("🔄 Обновление данных из Google Sheets...")
+            old_inventory_count = len(self.inventory)
+            old_prices_count = len(self.prices)
+            
+            self.load_data()
+            
+            new_inventory_count = len(self.inventory)
+            new_prices_count = len(self.prices)
+            
+            print(f"✅ Данные обновлены:")
+            print(f"   📦 Инвентарь: {old_inventory_count} → {new_inventory_count} записей")
+            print(f"   💰 Цены: {old_prices_count} → {new_prices_count} записей")
+            
+            return True
+        except Exception as e:
+            print(f"❌ Ошибка обновления данных: {e}")
+            return False
+
+    def is_available(self, item):
+        """Проверяет, доступно ли оборудование"""
+        availability = item.get('В наличии', '0')
+        try:
+            return int(availability) > 0
+        except ValueError:
+            return False
+
+    def find_equipment_by_barcode(self, barcode):
+        """Поиск оборудования по штрихкоду (очищает код от символов *)"""
+        # Очищаем код от символов * и пробелов
+        clean_barcode = str(barcode).strip().replace('*', '')
+        
+        for item in self.inventory:
+            # Проверяем несколько вариантов
+            item_barcode = str(item.get('Номер', '')).strip()
+            item_code = str(item.get('Штрихкод', '')).strip()
+            
+            # Убираем * из штрихкода для сравнения
+            clean_item_code = item_code.replace('*', '')
+            
+            if (item_barcode == clean_barcode or 
+                clean_item_code == clean_barcode or
+                item_code == barcode):  # Также проверяем полный код
+                return item
+        return None
+    
+    def find_equipment_by_params(self, equipment_type, brand, size):
+        """Поиск оборудования по параметрам"""
+        for item in self.inventory:
+            if (item.get('Вид') == equipment_type and 
+                item.get('Бренд') == brand and
+                (str(item.get('Ростовка', '')) == str(size) or 
+                 str(item.get('Размер', '')) == str(size))):
+                return item
+        return None
+    
+    def calculate_price(self, equipment_list, duration, is_weekend=False):
+        """Расчет стоимости аренды"""
+        # Упрощенная логика расчета (полную добавим позже)
+        total = 0
+        
+        for equipment in equipment_list:
+            equipment_type = equipment.get('Вид', '')
+            
+            # Поиск цены в матрице
+            for price_rule in self.prices:
+                if (price_rule['Вид'] == equipment_type and 
+                    price_rule['Срок аренды'] == duration and
+                    price_rule['День недели'] == ('Выходные' if is_weekend else 'Будни')):
+                    
+                    total += float(price_rule['Цена'])
+                    break
+        
+        return total
