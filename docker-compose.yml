@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./documents:/app/documents

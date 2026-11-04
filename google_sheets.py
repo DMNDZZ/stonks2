@@ -53,7 +53,28 @@ class GoogleSheetsManager:
             try:
                 print(f"🔄 Попытка подключения {attempt + 1}/{self.max_retries}...")
                 
-                self.gc = gspread.service_account(filename='credentials.json')
+                credentials_info = {
+                    "type": GOOGLE_TYPE,
+                    "project_id": GOOGLE_PROJECT_ID,
+                    "private_key_id": GOOGLE_PRIVATE_KEY_ID,
+                    "private_key": GOOGLE_PRIVATE_KEY,
+                    "client_email": GOOGLE_CLIENT_EMAIL,
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "auth_uri": GOOGLE_AUTH_URI,
+                    "token_uri": GOOGLE_TOKEN_URI,
+                    "auth_provider_x509_cert_url": GOOGLE_AUTH_PROVIDER_X509_CERT_URL,
+                    "client_x509_cert_url": GOOGLE_CLIENT_X509_CERT_URL,
+                    "universe_domain": GOOGLE_UNIVERSE_DOMAIN,
+                }
+                missing_fields = [
+                    field for field in ("project_id", "private_key_id", "private_key", "client_email", "client_id")
+                    if not credentials_info[field]
+                ]
+                if missing_fields:
+                    raise RuntimeError(
+                        "Google service account fields are missing: " + ", ".join(missing_fields)
+                    )
+                self.gc = gspread.service_account_from_dict(credentials_info)
                 self.spreadsheet = self.gc.open(SPREADSHEET_NAME)
                 
                 print("✅ Успешное подключение к Google Sheets!")

@@ -2,9 +2,11 @@
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 from inventory_manager import InventoryManager
 import os
 from config import *
+
 
 class RentalBot:
     def __init__(self):
@@ -2337,7 +2339,21 @@ def main():
             print("❌ ОШИБКА: BOT_TOKEN не найден в config.py")
             return
         
-        application = Application.builder().token(BOT_TOKEN).build()
+        request = HTTPXRequest(proxy=BOT_PROXY_URL)
+        get_updates_request = HTTPXRequest(proxy=BOT_PROXY_URL)
+
+        async def get_bot_link(application):
+            bot_info = await application.bot.get_me()
+            print(f"🤖 Бот url: https://t.me/{bot_info.username}")
+
+        application = (
+            Application.builder()
+            .token(BOT_TOKEN)
+            .request(request)
+            .get_updates_request(get_updates_request)
+            .post_init(get_bot_link)
+            .build()
+        )
         
         bot = RentalBot()
         
@@ -2358,6 +2374,7 @@ def main():
         print(f"❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ: {e}")
         import traceback
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()
