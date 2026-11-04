@@ -2,6 +2,7 @@ services:
   bot:
     build: .
     init: true
+    network_mode: host
     restart: unless-stopped
     env_file:
       - path: .env
